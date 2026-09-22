@@ -189,7 +189,7 @@
             flex-direction: column;
             align-items: center;
             gap: 4px;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
         }
 
         .tool-btn.active {
@@ -199,8 +199,8 @@
         }
 
         .tool-btn svg {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             fill: currentColor;
         }
 
@@ -237,6 +237,37 @@
         input[type="range"] {
             width: 100%;
             accent-color: var(--accent);
+        }
+
+        /* Layers Panel */
+        .layer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .layer-item {
+            background-color: var(--bg-color);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.8rem;
+        }
+
+        .layer-item.active {
+            border-color: var(--accent);
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        .layer-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         /* Center Canvas Area */
@@ -421,7 +452,7 @@
     </header>
 
     <div class="main-container">
-        <!-- Left Sidebar: Tools & Properties -->
+        <!-- Left Sidebar: Tools, Properties & Layers -->
         <div class="sidebar">
             <div class="panel-section">
                 <h3>Drawing Tools</h3>
@@ -446,6 +477,14 @@
                         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle></svg>
                         Circle
                     </button>
+                    <button class="tool-btn" data-tool="fill" onclick="setTool('fill')">
+                        <svg viewBox="0 0 24 24"><path d="M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z"></path><path d="M2 22h20"></path></svg>
+                        Paint Fill
+                    </button>
+                    <button class="tool-btn" data-tool="lasso" onclick="setTool('lasso')">
+                        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L12 11l6.3 6.3A9 9 0 1 1 3 12z"></path></svg>
+                        Lasso Select
+                    </button>
                     <button class="tool-btn" data-tool="eraser" onclick="setTool('eraser')">
                         <svg viewBox="0 0 24 24"><path d="M20 20H7L3 16C2 15 2 13 3 12L13 2l9 9-4.5 4.5"></path><path d="M18 13l-6-6"></path></svg>
                         Eraser
@@ -463,12 +502,30 @@
                     <label>Size: <span id="sizeVal">5</span>px</label>
                     <input type="range" id="strokeSize" min="1" max="50" value="5" oninput="updateSize(this.value)">
                 </div>
+                <div class="control-group" style="margin-top: 4px;">
+                    <label>Upload Image</label>
+                    <input type="file" id="imageUpload" accept="image/*" style="font-size: 0.75rem;" onchange="handleImageUpload(event)">
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3>Layers</h3>
+                    <button class="secondary" style="padding: 2px 6px; font-size: 0.75rem;" onclick="addLayer()">+ Layer</button>
+                </div>
+                <div class="layer-list" id="layerList">
+                    <!-- Layer items generated dynamically -->
+                </div>
             </div>
 
             <div class="panel-section">
                 <h3>Canvas Actions</h3>
                 <button class="secondary" onclick="clearCurrentFrame()">Clear Frame</button>
-                <button class="secondary" onclick="undoAction()">Undo Last Stroke</button>
+                <button class="secondary" onclick="undoAction()">Undo (Ctrl+Z)</button>
+                <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button class="secondary" style="flex:1;" onclick="copySelection()">Copy</button>
+                    <button class="secondary" style="flex:1;" onclick="pasteSelection()">Paste</button>
+                </div>
             </div>
         </div>
 
@@ -545,7 +602,7 @@
                 <button class="secondary" onclick="handleRemoteCode()">Accept Code & Connect</button>
             </div>
 
-            <div style="display: flex; flex-direction: column; gap: 6px;" id="answerSection" style="display:none;">
+            <div style="display: flex; flex-direction: column; gap: 6px;" id="answerSection">
                 <label style="font-size: 0.85rem; color: var(--text-muted);">Your Generated Answer Code (send back to Host):</label>
                 <textarea id="answerCodeOutput" rows="3" readonly></textarea>
             </div>
@@ -566,20 +623,29 @@
         let playInterval = null;
         let onionSkinEnabled = true;
 
-        // Animation Frames: Array of ImageData or Canvas offscreens
+        // Animation Frames structure:
+        // frames = [ { layers: [ { canvas: OffscreenCanvas, opacity: 1 }, ... ], activeLayer: 0 } ]
         let frames = [];
         let currentFrameIndex = 0;
+        let activeLayerIndex = 0;
 
         const canvas = document.getElementById('animCanvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        // Undo stack per frame
+        // Undo history per frame (Array of layer state arrays)
         let frameHistory = {};
 
-        // Drawing interaction states
+        // Drawing & Interaction states
         let isDrawing = false;
         let startX = 0, startY = 0;
         let snapshot = null;
+
+        // Lasso / Selection / Clipboard state
+        let lassoPoints = [];
+        let floatingSelection = null; // { canvas: OffscreenCanvas, x, y, width, height }
+        let isMovingSelection = false;
+        let selectionStartX = 0, selectionStartY = 0;
+        let clipboard = null;
 
         // --- WebRTC State ---
         let pc = null;
@@ -590,23 +656,57 @@
         window.addEventListener('load', () => {
             initFrames();
             setupCanvasEvents();
+            window.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                    e.preventDefault();
+                    undoAction();
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+                    e.preventDefault();
+                    copySelection();
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+                    e.preventDefault();
+                    pasteSelection();
+                }
+            });
         });
 
+        function createLayerCanvas() {
+            const c = document.createElement('canvas');
+            c.width = canvas.width;
+            c.height = canvas.height;
+            const cCtx = c.getContext('2d');
+            cCtx.fillStyle = '#ffffff';
+            cCtx.fillRect(0, 0, canvas.width, canvas.height);
+            return c;
+        }
+
         function initFrames() {
-            frames = [document.createElement('canvas')];
-            frames[0].width = canvas.width;
-            frames[0].height = canvas.height;
-            const fCtx = frames[0].getContext('2d');
-            fCtx.fillStyle = '#ffffff';
-            fCtx.fillRect(0, 0, canvas.width, canvas.height);
+            const firstLayer = { canvas: createLayerCanvas(), opacity: 1 };
+            frames = [{ layers: [firstLayer], activeLayer: 0 }];
+            currentFrameIndex = 0;
+            activeLayerIndex = 0;
             
-            frameHistory[0] = [];
-            loadFrameToMain(0);
+            frameHistory[0] = [cloneLayers(frames[0].layers)];
+            redrawCanvas();
             renderTimeline();
+            renderLayers();
+        }
+
+        function cloneLayers(layers) {
+            return layers.map(l => {
+                const c = document.createElement('canvas');
+                c.width = canvas.width;
+                c.height = canvas.height;
+                c.getContext('2d').drawImage(l.canvas, 0, 0);
+                return { canvas: c, opacity: l.opacity };
+            });
         }
 
         // --- Tool & Property Handlers ---
         function setTool(toolName) {
+            if (floatingSelection) commitFloatingSelection();
             currentTool = toolName;
             document.querySelectorAll('.tool-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.tool === toolName);
@@ -631,7 +731,109 @@
             redrawCanvas();
         }
 
-        // --- Canvas Drawing Logic ---
+        // --- Layers Management ---
+        function addLayer() {
+            if (floatingSelection) commitFloatingSelection();
+            const newLayerCanvas = document.createElement('canvas');
+            newLayerCanvas.width = canvas.width;
+            newLayerCanvas.height = canvas.height;
+            // Transparent background for new non-base layers
+            const lCtx = newLayerCanvas.getContext('2d');
+            lCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+            frames[currentFrameIndex].layers.push({ canvas: newLayerCanvas, opacity: 1 });
+            activeLayerIndex = frames[currentFrameIndex].layers.length - 1;
+            frames[currentFrameIndex].activeLayer = activeLayerIndex;
+
+            saveCurrentFrameState();
+            redrawCanvas();
+            renderLayers();
+        }
+
+        function selectLayer(idx) {
+            if (floatingSelection) commitFloatingSelection();
+            activeLayerIndex = idx;
+            frames[currentFrameIndex].activeLayer = idx;
+            renderLayers();
+        }
+
+        function updateLayerOpacity(idx, val) {
+            frames[currentFrameIndex].layers[idx].opacity = parseFloat(val);
+            redrawCanvas();
+        }
+
+        function deleteLayer(idx) {
+            if (frames[currentFrameIndex].layers.length <= 1) return;
+            if (floatingSelection) floatingSelection = null;
+            frames[currentFrameIndex].layers.splice(idx, 1);
+            if (activeLayerIndex >= frames[currentFrameIndex].layers.length) {
+                activeLayerIndex = frames[currentFrameIndex].layers.length - 1;
+            }
+            frames[currentFrameIndex].activeLayer = activeLayerIndex;
+            saveCurrentFrameState();
+            redrawCanvas();
+            renderLayers();
+        }
+
+        function renderLayers() {
+            const list = document.getElementById('layerList');
+            list.innerHTML = '';
+            const currentLayers = frames[currentFrameIndex].layers;
+
+            currentLayers.forEach((layer, idx) => {
+                const item = document.createElement('div');
+                item.className = `layer-item ${idx === activeLayerIndex ? 'active' : ''}`;
+                
+                item.innerHTML = `
+                    <div class="layer-info">
+                        <span style="cursor:pointer; font-weight:${idx===activeLayerIndex?'bold':'normal'};" onclick="selectLayer(${idx})">Layer ${idx + 1}</span>
+                        <div style="display:flex; gap:4px; align-items:center;">
+                            <span style="font-size:0.7rem; color:var(--text-muted);">${Math.round(layer.opacity * 100)}%</span>
+                            ${currentLayers.length > 1 ? `<button class="danger secondary" style="padding:1px 4px; font-size:0.65rem;" onclick="deleteLayer(${idx})">✕</button>` : ''}
+                        </div>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.05" value="${layer.opacity}" oninput="updateLayerOpacity(${idx}, this.value)">
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        // --- Image Upload Handler ---
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const lCanvas = frames[currentFrameIndex].layers[activeLayerIndex].canvas;
+                    const lCtx = lCanvas.getContext('2d');
+                    
+                    // Center and scale image proportionally to fit canvas bounds
+                    let w = img.width;
+                    let h = img.height;
+                    const maxW = canvas.width * 0.8;
+                    const maxH = canvas.height * 0.8;
+                    if (w > maxW || h > maxH) {
+                        const ratio = Math.min(maxW / w, maxH / h);
+                        w *= ratio;
+                        h *= ratio;
+                    }
+                    const x = (canvas.width - w) / 2;
+                    const y = (canvas.height - h) / 2;
+
+                    lCtx.drawImage(img, x, y, w, h);
+                    saveCurrentFrameState();
+                    redrawCanvas();
+                    broadcastCanvasState();
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        }
+
+        // --- Canvas Drawing & Selection Events ---
         function setupCanvasEvents() {
             canvas.addEventListener('mousedown', startDraw);
             canvas.addEventListener('mousemove', draw);
@@ -653,72 +855,290 @@
 
         function startDraw(e) {
             if (isPlaying) return;
-            isDrawing = true;
             const pos = getMousePos(e);
+            const activeLayerCtx = frames[currentFrameIndex].layers[activeLayerIndex].canvas.getContext('2d', { willReadFrequently: true });
+
+            if (floatingSelection) {
+                if (pos.x >= floatingSelection.x && pos.x <= floatingSelection.x + floatingSelection.width &&
+                    pos.y >= floatingSelection.y && pos.y <= floatingSelection.y + floatingSelection.height) {
+                    isMovingSelection = true;
+                    selectionStartX = pos.x - floatingSelection.x;
+                    selectionStartY = pos.y - floatingSelection.y;
+                    return;
+                } else {
+                    commitFloatingSelection();
+                }
+            }
+
+            isDrawing = true;
             startX = pos.x;
             startY = pos.y;
-            snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            snapshot = activeLayerCtx.getImageData(0, 0, canvas.width, canvas.height);
 
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.strokeStyle = currentTool === 'eraser' ? '#ffffff' : strokeColor;
-            ctx.lineWidth = strokeSize;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
+            if (currentTool === 'fill') {
+                floodFillActiveLayer(Math.floor(startX), Math.floor(startY), strokeColor);
+                isDrawing = false;
+                saveCurrentFrameState();
+                broadcastCanvasState();
+                return;
+            }
+
+            if (currentTool === 'lasso') {
+                lassoPoints = [{x: startX, y: startY}];
+                return;
+            }
+
+            activeLayerCtx.beginPath();
+            activeLayerCtx.moveTo(startX, startY);
+            activeLayerCtx.strokeStyle = currentTool === 'eraser' ? '#ffffff' : strokeColor;
+            activeLayerCtx.lineWidth = strokeSize;
+            activeLayerCtx.lineCap = 'round';
+            activeLayerCtx.lineJoin = 'round';
         }
 
         function draw(e) {
-            if (!isDrawing || isPlaying) return;
             const pos = getMousePos(e);
+            const activeLayerCtx = frames[currentFrameIndex].layers[activeLayerIndex].canvas.getContext('2d', { willReadFrequently: true });
+
+            if (isMovingSelection && floatingSelection) {
+                floatingSelection.x = pos.x - selectionStartX;
+                floatingSelection.y = pos.y - selectionStartY;
+                redrawCanvas();
+                return;
+            }
+
+            if (!isDrawing || isPlaying) return;
+
+            if (currentTool === 'lasso') {
+                lassoPoints.push({x: pos.x, y: pos.y});
+                redrawCanvas();
+                // Draw lasso preview line
+                ctx.save();
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+                for(let i=1; i<lassoPoints.length; i++) ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+                ctx.stroke();
+                ctx.restore();
+                return;
+            }
 
             if (currentTool === 'brush' || currentTool === 'pencil' || currentTool === 'eraser') {
                 if (currentTool === 'pencil') {
-                    ctx.lineWidth = Math.max(1, strokeSize / 3);
+                    activeLayerCtx.lineWidth = Math.max(1, strokeSize / 3);
                 } else if (currentTool === 'eraser') {
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = strokeSize * 1.5;
+                    activeLayerCtx.strokeStyle = '#ffffff';
+                    activeLayerCtx.lineWidth = strokeSize * 1.5;
                 } else {
-                    ctx.strokeStyle = strokeColor;
-                    ctx.lineWidth = strokeSize;
+                    activeLayerCtx.strokeStyle = strokeColor;
+                    activeLayerCtx.lineWidth = strokeSize;
                 }
-                ctx.lineTo(pos.x, pos.y);
-                ctx.stroke();
+                activeLayerCtx.lineTo(pos.x, pos.y);
+                activeLayerCtx.stroke();
+                redrawCanvas();
             } else {
                 // Shape tools: line, rect, circle
-                ctx.putImageData(snapshot, 0, 0);
-                ctx.strokeStyle = strokeColor;
-                ctx.lineWidth = strokeSize;
-                ctx.beginPath();
+                activeLayerCtx.putImageData(snapshot, 0, 0);
+                activeLayerCtx.strokeStyle = strokeColor;
+                activeLayerCtx.lineWidth = strokeSize;
+                activeLayerCtx.beginPath();
                 if (currentTool === 'line') {
-                    ctx.moveTo(startX, startY);
-                    ctx.lineTo(pos.x, pos.y);
-                    ctx.stroke();
+                    activeLayerCtx.moveTo(startX, startY);
+                    activeLayerCtx.lineTo(pos.x, pos.y);
+                    activeLayerCtx.stroke();
                 } else if (currentTool === 'rect') {
-                    ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+                    activeLayerCtx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
                 } else if (currentTool === 'circle') {
                     let radius = Math.hypot(pos.x - startX, pos.y - startY);
-                    ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
-                    ctx.stroke();
+                    activeLayerCtx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                    activeLayerCtx.stroke();
                 }
+                redrawCanvas();
             }
         }
 
         function stopDraw() {
+            if (isMovingSelection) {
+                isMovingSelection = false;
+                return;
+            }
+
             if (!isDrawing) return;
             isDrawing = false;
+
+            if (currentTool === 'lasso' && lassoPoints.length > 2) {
+                createFloatingSelectionFromLasso();
+                return;
+            }
+
             saveCurrentFrameState();
             broadcastCanvasState();
         }
 
-        function saveCurrentFrameState() {
-            const fCanvas = frames[currentFrameIndex];
-            const fCtx = fCanvas.getContext('2d');
-            fCtx.clearRect(0, 0, canvas.width, canvas.height);
-            fCtx.drawImage(canvas, 0, 0);
+        // --- Flood Fill Algorithm ---
+        function hexToRgba(hex) {
+            let c = hex.replace('#','');
+            if(c.length===3) c = c.split('').map(x=>x+x).join('');
+            const num = parseInt(c, 16);
+            return [num >> 16, (num >> 8) & 255, num & 255, 255];
+        }
 
-            // Save history for undo
+        function floodFillActiveLayer(startX, startY, fillColorHex) {
+            const activeLayerCtx = frames[currentFrameIndex].layers[activeLayerIndex].canvas.getContext('2d', { willReadFrequently: true });
+            const imgData = activeLayerCtx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imgData.data;
+            const width = canvas.width;
+            const height = canvas.height;
+
+            const targetIdx = (startY * width + startX) * 4;
+            const targetR = data[targetIdx];
+            const targetG = data[targetIdx + 1];
+            const targetB = data[targetIdx + 2];
+            const targetA = data[targetIdx + 3];
+
+            const [fillR, fillG, fillB, fillA] = hexToRgba(fillColorHex);
+
+            if (targetR === fillR && targetG === fillG && targetB === fillB && targetA === fillA) return;
+
+            const queue = [[startX, startY]];
+            const visited = new Uint8Array(width * height);
+
+            while (queue.length > 0) {
+                const [x, y] = queue.pop();
+                if (x < 0 || x >= width || y < 0 || y >= height) continue;
+                const idx = y * width + x;
+                if (visited[idx]) continue;
+                visited[idx] = 1;
+
+                const currIdx = (y * width + x) * 4;
+                if (data[currIdx] === targetR && data[currIdx+1] === targetG && data[currIdx+2] === targetB && data[currIdx+3] === targetA) {
+                    data[currIdx] = fillR;
+                    data[currIdx+1] = fillG;
+                    data[currIdx+2] = fillB;
+                    data[currIdx+3] = fillA;
+
+                    queue.push([x + 1, y]);
+                    queue.push([x - 1, y]);
+                    queue.push([x, y + 1]);
+                    queue.push([x, y - 1]);
+                }
+            }
+
+            activeLayerCtx.putImageData(imgData, 0, 0);
+            redrawCanvas();
+        }
+
+        // --- Lasso Selection & Copy / Paste ---
+        function createFloatingSelectionFromLasso() {
+            let minX = canvas.width, maxX = 0, minY = canvas.height, maxY = 0;
+            lassoPoints.forEach(p => {
+                if(p.x < minX) minX = p.x;
+                if(p.x > maxX) maxX = p.x;
+                if(p.y < minY) minY = p.y;
+                if(p.y > maxY) maxY = p.y;
+            });
+
+            minX = Math.max(0, Math.floor(minX));
+            maxX = Math.min(canvas.width, Math.ceil(maxX));
+            minY = Math.max(0, Math.floor(minY));
+            maxY = Math.min(canvas.height, Math.ceil(maxY));
+
+            const w = maxX - minX;
+            const h = maxY - minY;
+            if (w <= 0 || h <= 0) return;
+
+            const activeLayerCanvas = frames[currentFrameIndex].layers[activeLayerIndex].canvas;
+            const activeLayerCtx = activeLayerCanvas.getContext('2d');
+
+            const selCanvas = document.createElement('canvas');
+            selCanvas.width = w;
+            selCanvas.height = h;
+            const sCtx = selCanvas.getContext('2d');
+
+            sCtx.save();
+            sCtx.translate(-minX, -minY);
+            sCtx.beginPath();
+            sCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+            for(let i=1; i<lassoPoints.length; i++) sCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+            sCtx.closePath();
+            sCtx.clip();
+            sCtx.drawImage(activeLayerCanvas, 0, 0);
+            sCtx.restore();
+
+            activeLayerCtx.save();
+            activeLayerCtx.beginPath();
+            activeLayerCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+            for(let i=1; i<lassoPoints.length; i++) activeLayerCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+            activeLayerCtx.closePath();
+            activeLayerCtx.fillStyle = '#ffffff';
+            activeLayerCtx.fill();
+            activeLayerCtx.restore();
+
+            saveCurrentFrameState();
+
+            floatingSelection = {
+                canvas: selCanvas,
+                x: minX,
+                y: minY,
+                width: w,
+                height: h
+            };
+
+            clipboard = floatingSelection;
+            lassoPoints = [];
+            redrawCanvas();
+        }
+
+        function copySelection() {
+            if (floatingSelection) {
+                clipboard = floatingSelection;
+            } else {
+                const selCanvas = document.createElement('canvas');
+                selCanvas.width = canvas.width;
+                selCanvas.height = canvas.height;
+                selCanvas.getContext('2d').drawImage(canvas, 0, 0);
+                clipboard = { canvas: selCanvas, x: 0, y: 0, width: canvas.width, height: canvas.height };
+            }
+        }
+
+        function pasteSelection() {
+            if (floatingSelection) commitFloatingSelection();
+            if (!clipboard) return;
+
+            const selCanvas = document.createElement('canvas');
+            selCanvas.width = clipboard.width;
+            selCanvas.height = clipboard.height;
+            selCanvas.getContext('2d').drawImage(clipboard.canvas, 0, 0);
+
+            floatingSelection = {
+                canvas: selCanvas,
+                x: 20,
+                y: 20,
+                width: clipboard.width,
+                height: clipboard.height
+            };
+            redrawCanvas();
+        }
+
+        function commitFloatingSelection() {
+            if (!floatingSelection) return;
+            const activeLayerCtx = frames[currentFrameIndex].layers[activeLayerIndex].canvas.getContext('2d');
+            activeLayerCtx.drawImage(floatingSelection.canvas, floatingSelection.x, floatingSelection.y);
+            floatingSelection = null;
+            saveCurrentFrameState();
+            broadcastCanvasState();
+            redrawCanvas();
+        }
+
+        // --- Frame & Undo History Management ---
+        function saveCurrentFrameState() {
+            if (floatingSelection) commitFloatingSelection();
+
             if(!frameHistory[currentFrameIndex]) frameHistory[currentFrameIndex] = [];
-            frameHistory[currentFrameIndex].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            if(frameHistory[currentFrameIndex].length >= 20) frameHistory[currentFrameIndex].shift();
+            frameHistory[currentFrameIndex].push(cloneLayers(frames[currentFrameIndex].layers));
             renderTimeline();
         }
 
@@ -730,72 +1150,101 @@
             // Onion skinning (previous frame ghost)
             if (onionSkinEnabled && currentFrameIndex > 0) {
                 ctx.save();
-                ctx.globalAlpha = 0.25;
-                ctx.drawImage(frames[currentFrameIndex - 1], 0, 0);
+                ctx.globalAlpha = 0.2;
+                frames[currentFrameIndex - 1].layers.forEach(l => {
+                    ctx.globalAlpha = 0.2 * l.opacity;
+                    ctx.drawImage(l.canvas, 0, 0);
+                });
                 ctx.restore();
             }
 
-            // Current frame
-            if (frames[currentFrameIndex]) {
-                ctx.drawImage(frames[currentFrameIndex], 0, 0);
+            // Draw current frame layers in order with respective opacities
+            frames[currentFrameIndex].layers.forEach(l => {
+                ctx.save();
+                ctx.globalAlpha = l.opacity;
+                ctx.drawImage(l.canvas, 0, 0);
+                ctx.restore();
+            });
+
+            // Draw floating selection if active
+            if (floatingSelection) {
+                ctx.drawImage(floatingSelection.canvas, floatingSelection.x, floatingSelection.y);
+                ctx.save();
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeRect(floatingSelection.x, floatingSelection.y, floatingSelection.width, floatingSelection.height);
+                ctx.restore();
             }
         }
 
         function loadFrameToMain(index) {
+            if (floatingSelection) commitFloatingSelection();
             currentFrameIndex = index;
+            if (activeLayerIndex >= frames[currentFrameIndex].layers.length) {
+                activeLayerIndex = frames[currentFrameIndex].layers.length - 1;
+            }
             redrawCanvas();
             renderTimeline();
+            renderLayers();
         }
 
         function clearCurrentFrame() {
-            const fCanvas = frames[currentFrameIndex];
-            const fCtx = fCanvas.getContext('2d');
-            fCtx.fillStyle = '#ffffff';
-            fCtx.fillRect(0, 0, canvas.width, canvas.height);
+            if (floatingSelection) floatingSelection = null;
+            frames[currentFrameIndex].layers.forEach(l => {
+                const lCtx = l.canvas.getContext('2d');
+                lCtx.fillStyle = '#ffffff';
+                lCtx.fillRect(0, 0, canvas.width, canvas.height);
+            });
             redrawCanvas();
             saveCurrentFrameState();
-            broadcastAction({ type: 'clear', frame: currentFrameIndex });
+            broadcastCanvasState();
         }
 
         function undoAction() {
+            if (floatingSelection) {
+                floatingSelection = null;
+                redrawCanvas();
+                return;
+            }
+
             if (frameHistory[currentFrameIndex] && frameHistory[currentFrameIndex].length > 1) {
-                frameHistory[currentFrameIndex].pop(); // remove current state
+                frameHistory[currentFrameIndex].pop(); // remove current state tip
                 const prevState = frameHistory[currentFrameIndex][frameHistory[currentFrameIndex].length - 1];
-                ctx.putImageData(prevState, 0, 0);
-                saveCurrentFrameState();
+                frames[currentFrameIndex].layers = cloneLayers(prevState);
+                
+                redrawCanvas();
+                renderTimeline();
+                renderLayers();
+                broadcastCanvasState();
             }
         }
 
         // --- Timeline Frame Management ---
         function addFrame() {
-            const newF = document.createElement('canvas');
-            newF.width = canvas.width;
-            newF.height = canvas.height;
-            const fCtx = newF.getContext('2d');
-            fCtx.fillStyle = '#ffffff';
-            fCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-            frames.push(newF);
+            if (floatingSelection) commitFloatingSelection();
+            const newLayer = { canvas: createLayerCanvas(), opacity: 1 };
+            frames.push({ layers: [newLayer], activeLayer: 0 });
             currentFrameIndex = frames.length - 1;
-            frameHistory[currentFrameIndex] = [];
+            activeLayerIndex = 0;
+            frameHistory[currentFrameIndex] = [cloneLayers(frames[currentFrameIndex].layers)];
             loadFrameToMain(currentFrameIndex);
         }
 
         function duplicateFrame() {
-            const newF = document.createElement('canvas');
-            newF.width = canvas.width;
-            newF.height = canvas.height;
-            const fCtx = newF.getContext('2d');
-            fCtx.drawImage(frames[currentFrameIndex], 0, 0);
-
-            frames.splice(currentFrameIndex + 1, 0, newF);
+            if (floatingSelection) commitFloatingSelection();
+            const clonedLayers = cloneLayers(frames[currentFrameIndex].layers);
+            frames.splice(currentFrameIndex + 1, 0, { layers: clonedLayers, activeLayer: activeLayerIndex });
             currentFrameIndex++;
+            frameHistory[currentFrameIndex] = [cloneLayers(clonedLayers)];
             loadFrameToMain(currentFrameIndex);
         }
 
         function deleteCurrentFrame() {
             if (frames.length <= 1) return;
+            if (floatingSelection) floatingSelection = null;
             frames.splice(currentFrameIndex, 1);
+            delete frameHistory[currentFrameIndex];
             if (currentFrameIndex >= frames.length) currentFrameIndex = frames.length - 1;
             loadFrameToMain(currentFrameIndex);
         }
@@ -803,16 +1252,23 @@
         function renderTimeline() {
             const strip = document.getElementById('framesStrip');
             strip.innerHTML = '';
-            frames.forEach((fCanvas, idx) => {
+            frames.forEach((fObj, idx) => {
                 const thumb = document.createElement('div');
                 thumb.className = `frame-thumb ${idx === currentFrameIndex ? 'active' : ''}`;
                 thumb.onclick = () => loadFrameToMain(idx);
 
                 const tCanvas = document.createElement('canvas');
-                tCanvas.width = fCanvas.width;
-                tCanvas.height = fCanvas.height;
+                tCanvas.width = canvas.width;
+                tCanvas.height = canvas.height;
                 const tCtx = tCanvas.getContext('2d');
-                tCtx.drawImage(fCanvas, 0, 0);
+                tCtx.fillStyle = '#ffffff';
+                tCtx.fillRect(0, 0, canvas.width, canvas.height);
+                fObj.layers.forEach(l => {
+                    tCtx.save();
+                    tCtx.globalAlpha = l.opacity;
+                    tCtx.drawImage(l.canvas, 0, 0);
+                    tCtx.restore();
+                });
 
                 const num = document.createElement('span');
                 num.className = 'frame-number';
@@ -826,6 +1282,7 @@
 
         // --- Animation Playback ---
         function togglePlay() {
+            if (floatingSelection) commitFloatingSelection();
             if (isPlaying) {
                 stopPlay();
             } else {
@@ -843,7 +1300,12 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(frames[playIdx], 0, 0);
+                frames[playIdx].layers.forEach(l => {
+                    ctx.save();
+                    ctx.globalAlpha = l.opacity;
+                    ctx.drawImage(l.canvas, 0, 0);
+                    ctx.restore();
+                });
                 playIdx = (playIdx + 1) % frames.length;
             }, 1000 / fps);
         }
@@ -886,7 +1348,6 @@
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Wait briefly for ICE candidates gathering
             setTimeout(() => {
                 document.getElementById('offerCodeOutput').value = JSON.stringify(pc.localDescription);
             }, 800);
@@ -910,7 +1371,6 @@
 
                 setTimeout(() => {
                     document.getElementById('answerCodeOutput').value = JSON.stringify(pc.localDescription);
-                    document.getElementById('answerSection').style.display = 'flex';
                 }, 800);
             } else if (remoteDesc.type === 'answer') {
                 await pc.setRemoteDescription(remoteDesc);
@@ -927,38 +1387,28 @@
                 } else if (msg.type === 'canvas-sync') {
                     const img = new Image();
                     img.onload = () => {
-                        const fCanvas = frames[msg.frame] || addFrameFromRemote(msg.frame);
-                        const fCtx = fCanvas.getContext('2d');
-                        fCtx.clearRect(0, 0, canvas.width, canvas.height);
-                        fCtx.drawImage(img, 0, 0);
+                        while(frames.length <= msg.frame) {
+                            frames.push({ layers: [{ canvas: createLayerCanvas(), opacity: 1 }], activeLayer: 0 });
+                        }
+                        const lCanvas = frames[msg.frame].layers[0].canvas;
+                        const lCtx = lCanvas.getContext('2d');
+                        lCtx.clearRect(0, 0, canvas.width, canvas.height);
+                        lCtx.drawImage(img, 0, 0);
                         if (msg.frame === currentFrameIndex) redrawCanvas();
                         renderTimeline();
                     };
                     img.src = msg.dataUrl;
                 } else if (msg.type === 'clear') {
-                    const fCanvas = frames[msg.frame];
-                    if (fCanvas) {
-                        const fCtx = fCanvas.getContext('2d');
-                        fCtx.fillStyle = '#ffffff';
-                        fCtx.fillRect(0, 0, canvas.width, canvas.height);
+                    if (frames[msg.frame]) {
+                        frames[msg.frame].layers.forEach(l => {
+                            const lCtx = l.canvas.getContext('2d');
+                            lCtx.fillStyle = '#ffffff';
+                            lCtx.fillRect(0, 0, canvas.width, canvas.height);
+                        });
                         if (msg.frame === currentFrameIndex) redrawCanvas();
                     }
                 }
             };
-        }
-
-        function addFrameFromRemote(idx) {
-            while(frames.length <= idx) {
-                const newF = document.createElement('canvas');
-                newF.width = canvas.width;
-                newF.height = canvas.height;
-                const fCtx = newF.getContext('2d');
-                fCtx.fillStyle = '#ffffff';
-                fCtx.fillRect(0, 0, canvas.width, canvas.height);
-                frames.push(newF);
-            }
-            renderTimeline();
-            return frames[idx];
         }
 
         function broadcastCanvasState() {
