@@ -244,7 +244,7 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-            max-height: 150px;
+            max-height: 160px;
             overflow-y: auto;
         }
 
@@ -257,6 +257,23 @@
             flex-direction: column;
             gap: 4px;
             font-size: 0.8rem;
+            cursor: grab;
+            user-select: none;
+            transition: border-color 0.2s, background-color 0.2s;
+        }
+
+        .layer-item:active {
+            cursor: grabbing;
+        }
+
+        .layer-item.dragging {
+            opacity: 0.4;
+            border-style: dashed;
+        }
+
+        .layer-item.drag-over {
+            border-color: var(--accent);
+            background-color: rgba(59, 130, 246, 0.15);
         }
 
         .layer-item.active {
@@ -447,6 +464,7 @@
         </h1>
         <div style="display: flex; gap: 10px; align-items: center;">
             <span id="connectionStatus" class="status-badge">Disconnected</span>
+            <button class="secondary" onclick="openModal('exportModal')">Export Project</button>
             <button class="secondary" onclick="openModal('connectionModal')">Connect Peers</button>
         </div>
     </header>
@@ -506,11 +524,15 @@
                     <label>Upload Image</label>
                     <input type="file" id="imageUpload" accept="image/*" style="font-size: 0.75rem;" onchange="handleImageUpload(event)">
                 </div>
+                <div class="control-group" style="margin-top: 4px;">
+                    <label>Background Audio</label>
+                    <input type="file" id="audioUpload" accept="audio/*" style="font-size: 0.75rem;" onchange="handleAudioUpload(event)">
+                </div>
             </div>
 
             <div class="panel-section">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3>Layers</h3>
+                    <h3>Layers (Drag to Reorder)</h3>
                     <button class="secondary" style="padding: 2px 6px; font-size: 0.75rem;" onclick="addLayer()">+ Layer</button>
                 </div>
                 <div class="layer-list" id="layerList">
@@ -613,6 +635,25 @@
         </div>
     </div>
 
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal">
+            <h2>Export Project</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Choose your export format below.</p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+                <button onclick="exportPSA()">Export as .PSA (Python-Sandy Animator File)</button>
+                <button class="secondary" onclick="exportMP4()">Export as MP4 Video (WebM/MP4 Recording)</button>
+                <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted);">Import .PSA Project File:</label>
+                    <input type="file" id="psaImportInput" accept=".psa,.json" style="font-size: 0.75rem;" onchange="importPSA(event)">
+                </div>
+            </div>
+            <div class="modal-actions" style="margin-top: 10px;">
+                <button class="secondary" onclick="closeModal('exportModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // --- Application State ---
         let currentTool = 'brush';
@@ -622,6 +663,8 @@
         let isPlaying = false;
         let playInterval = null;
         let onionSkinEnabled = true;
+        let backgroundAudioData = null; // Base64 audio string
+        let audioElement = null;
 
         // Animation Frames structure:
         // frames = [ { layers: [ { canvas: OffscreenCanvas, opacity: 1 }, ... ], activeLayer: 0 } ]
@@ -731,13 +774,12 @@
             redrawCanvas();
         }
 
-        // --- Layers Management ---
+        // --- Layers Management & Drag-to-Reorder ---
         function addLayer() {
             if (floatingSelection) commitFloatingSelection();
             const newLayerCanvas = document.createElement('canvas');
             newLayerCanvas.width = canvas.width;
             newLayerCanvas.height = canvas.height;
-            // Transparent background for new non-base layers
             const lCtx = newLayerCanvas.getContext('2d');
             lCtx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -783,10 +825,37 @@
             currentLayers.forEach((layer, idx) => {
                 const item = document.createElement('div');
                 item.className = `layer-item ${idx === activeLayerIndex ? 'active' : ''}`;
-                
+                item.setAttribute('draggable', 'true');
+                item.dataset.index = idx;
+
+                // Drag and drop handlers for layer reordering
+                item.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', idx);
+                    item.classList.add('dragging');
+                });
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('dragging');
+                    document.querySelectorAll('.layer-item').forEach(el => el.classList.remove('drag-over'));
+                });
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    item.classList.add('drag-over');
+                });
+                item.addEventListener('dragleave', () => {
+                    item.classList.remove('drag-over');
+                });
+                item.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                    const toIdx = idx;
+                    if (fromIdx !== toIdx) {
+                        reorderLayers(fromIdx, toIdx);
+                    }
+                });
+
                 item.innerHTML = `
                     <div class="layer-info">
-                        <span style="cursor:pointer; font-weight:${idx===activeLayerIndex?'bold':'normal'};" onclick="selectLayer(${idx})">Layer ${idx + 1}</span>
+                        <span style="cursor:pointer; font-weight:${idx===activeLayerIndex?'bold':'normal'};" onclick="selectLayer(${idx})">☰ Layer ${idx + 1}</span>
                         <div style="display:flex; gap:4px; align-items:center;">
                             <span style="font-size:0.7rem; color:var(--text-muted);">${Math.round(layer.opacity * 100)}%</span>
                             ${currentLayers.length > 1 ? `<button class="danger secondary" style="padding:1px 4px; font-size:0.65rem;" onclick="deleteLayer(${idx})">✕</button>` : ''}
@@ -796,6 +865,31 @@
                 `;
                 list.appendChild(item);
             });
+        }
+
+        function reorderLayers(fromIdx, toIdx) {
+            if (floatingSelection) commitFloatingSelection();
+            const layers = frames[currentFrameIndex].layers;
+            const [movedLayer] = layers.splice(fromIdx, 1);
+            layers.splice(toIdx, 0, movedLayer);
+            activeLayerIndex = toIdx;
+            frames[currentFrameIndex].activeLayer = activeLayerIndex;
+            saveCurrentFrameState();
+            redrawCanvas();
+            renderLayers();
+        }
+
+        // --- Audio Upload Handler ---
+        function handleAudioUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                backgroundAudioData = event.target.result;
+                audioElement = new Audio(backgroundAudioData);
+                appendSystemChat('Audio track loaded successfully!');
+            };
+            reader.readAsDataURL(file);
         }
 
         // --- Image Upload Handler ---
@@ -809,7 +903,6 @@
                     const lCanvas = frames[currentFrameIndex].layers[activeLayerIndex].canvas;
                     const lCtx = lCanvas.getContext('2d');
                     
-                    // Center and scale image proportionally to fit canvas bounds
                     let w = img.width;
                     let h = img.height;
                     const maxW = canvas.width * 0.8;
@@ -912,7 +1005,6 @@
             if (currentTool === 'lasso') {
                 lassoPoints.push({x: pos.x, y: pos.y});
                 redrawCanvas();
-                // Draw lasso preview line
                 ctx.save();
                 ctx.strokeStyle = '#3b82f6';
                 ctx.lineWidth = 1.5;
@@ -939,7 +1031,6 @@
                 activeLayerCtx.stroke();
                 redrawCanvas();
             } else {
-                // Shape tools: line, rect, circle
                 activeLayerCtx.putImageData(snapshot, 0, 0);
                 activeLayerCtx.strokeStyle = strokeColor;
                 activeLayerCtx.lineWidth = strokeSize;
@@ -1147,7 +1238,6 @@
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Onion skinning (previous frame ghost)
             if (onionSkinEnabled && currentFrameIndex > 0) {
                 ctx.save();
                 ctx.globalAlpha = 0.2;
@@ -1158,7 +1248,6 @@
                 ctx.restore();
             }
 
-            // Draw current frame layers in order with respective opacities
             frames[currentFrameIndex].layers.forEach(l => {
                 ctx.save();
                 ctx.globalAlpha = l.opacity;
@@ -1166,7 +1255,6 @@
                 ctx.restore();
             });
 
-            // Draw floating selection if active
             if (floatingSelection) {
                 ctx.drawImage(floatingSelection.canvas, floatingSelection.x, floatingSelection.y);
                 ctx.save();
@@ -1209,7 +1297,7 @@
             }
 
             if (frameHistory[currentFrameIndex] && frameHistory[currentFrameIndex].length > 1) {
-                frameHistory[currentFrameIndex].pop(); // remove current state tip
+                frameHistory[currentFrameIndex].pop();
                 const prevState = frameHistory[currentFrameIndex][frameHistory[currentFrameIndex].length - 1];
                 frames[currentFrameIndex].layers = cloneLayers(prevState);
                 
@@ -1280,7 +1368,7 @@
             });
         }
 
-        // --- Animation Playback ---
+        // --- Animation Playback with Audio Support ---
         function togglePlay() {
             if (floatingSelection) commitFloatingSelection();
             if (isPlaying) {
@@ -1295,6 +1383,11 @@
             isPlaying = true;
             document.getElementById('playBtn').innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop`;
             
+            if (audioElement) {
+                audioElement.currentTime = 0;
+                audioElement.play().catch(e => console.log('Audio playback prevented:', e));
+            }
+
             let playIdx = 0;
             playInterval = setInterval(() => {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1313,8 +1406,171 @@
         function stopPlay() {
             isPlaying = false;
             clearInterval(playInterval);
+            if (audioElement) {
+                audioElement.pause();
+            }
             document.getElementById('playBtn').innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
             loadFrameToMain(currentFrameIndex);
+        }
+
+        // --- Export & Import (.PSA & MP4) ---
+        function exportPSA() {
+            if (floatingSelection) commitFloatingSelection();
+            
+            const projectData = {
+                fps: fps,
+                width: canvas.width,
+                height: canvas.height,
+                audio: backgroundAudioData,
+                frames: frames.map(f => ({
+                    activeLayer: f.activeLayer,
+                    layers: f.layers.map(l => ({
+                        opacity: l.opacity,
+                        dataUrl: l.canvas.toDataURL()
+                    }))
+                }))
+            };
+
+            const jsonString = JSON.stringify(projectData);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'animation.psa';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            closeModal('exportModal');
+        }
+
+        function importPSA(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (!data.frames) throw new Error('Invalid PSA file structure');
+
+                    fps = data.fps || 8;
+                    document.getElementById('fpsLabel').innerText = `FPS: ${fps}`;
+
+                    if (data.audio) {
+                        backgroundAudioData = data.audio;
+                        audioElement = new Audio(backgroundAudioData);
+                    }
+
+                    let loadedFrames = [];
+                    let pendingImages = 0;
+
+                    data.frames.forEach((fData, fIdx) => {
+                        let fLayers = [];
+                        fData.layers.forEach((lData, lIdx) => {
+                            const c = document.createElement('canvas');
+                            c.width = data.width || 640;
+                            c.height = data.height || 480;
+                            const cCtx = c.getContext('2d');
+                            
+                            pendingImages++;
+                            const img = new Image();
+                            img.onload = () => {
+                                cCtx.drawImage(img, 0, 0);
+                                pendingImages--;
+                                if (pendingImages === 0) {
+                                    finishImport(loadedFrames);
+                                }
+                            };
+                            img.src = lData.dataUrl;
+                            fLayers.push({ canvas: c, opacity: lData.opacity });
+                        });
+                        loadedFrames.push({ layers: fLayers, activeLayer: fData.activeLayer || 0 });
+                    });
+                } catch (err) {
+                    alert('Failed to parse .PSA file: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function finishImport(loadedFrames) {
+            frames = loadedFrames;
+            currentFrameIndex = 0;
+            activeLayerIndex = frames[0].activeLayer || 0;
+            frameHistory = {};
+            frames.forEach((f, idx) => {
+                frameHistory[idx] = [cloneLayers(f.layers)];
+            });
+            loadFrameToMain(0);
+            closeModal('exportModal');
+            appendSystemChat('Project imported successfully from .PSA file!');
+        }
+
+        async function exportMP4() {
+            if (floatingSelection) commitFloatingSelection();
+            closeModal('exportModal');
+            
+            // Render animation stream into video via MediaRecorder
+            const stream = canvas.captureStream(fps);
+            let recorder;
+            try {
+                recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+            } catch (e) {
+                try {
+                    recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                } catch (err) {
+                    alert('Video recording not supported on this browser.');
+                    return;
+                }
+            }
+
+            let chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'animation.mp4';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                appendSystemChat('Video export completed successfully!');
+            };
+
+            recorder.start();
+            
+            // Play through animation frames for capture
+            let playIdx = 0;
+            if (audioElement) {
+                audioElement.currentTime = 0;
+                audioElement.play().catch(e => {});
+            }
+
+            const totalFrames = frames.length;
+            const frameDuration = 1000 / fps;
+
+            let captureInterval = setInterval(() => {
+                if (playIdx >= totalFrames) {
+                    clearInterval(captureInterval);
+                    if (audioElement) audioElement.pause();
+                    recorder.stop();
+                    loadFrameToMain(currentFrameIndex);
+                    return;
+                }
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                frames[playIdx].layers.forEach(l => {
+                    ctx.save();
+                    ctx.globalAlpha = l.opacity;
+                    ctx.drawImage(l.canvas, 0, 0);
+                    ctx.restore();
+                });
+                playIdx++;
+            }, frameDuration);
         }
 
         // --- WebRTC P2P Signaling ---
@@ -1419,12 +1675,6 @@
                     frame: currentFrameIndex,
                     dataUrl: dataUrl
                 }));
-            }
-        }
-
-        function broadcastAction(actionObj) {
-            if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify(actionObj));
             }
         }
 
