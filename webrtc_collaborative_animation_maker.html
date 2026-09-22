@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Collaborative Animation Maker</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .checkerboard {
+            background-image: linear-gradient(45deg, #f3f4f6 25%, transparent 25%), 
+                              linear-gradient(-45deg, #f3f4f6 25%, transparent 25%), 
+                              linear-gradient(45deg, transparent 75%, #f3f4f6 75%), 
+                              linear-gradient(-45deg, transparent 75%, #f3f4f6 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        /* Custom scrollbar for timeline */
+        ::-webkit-scrollbar { height: 6px; width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-full flex flex-col overflow-hidden">
+
+    <header class="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between shrink-0 shadow-md">
+        <div class="flex items-center space-x-3">
+            <div class="bg-gradient-to-tr from-indigo-500 to-violet-500 p-2.5 rounded-xl shadow-lg flex items-center justify-center text-white">
+                <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg tracking-tight text-white flex items-center gap-2">
+                    AnimTogether <span class="text-xs font-semibold px-2 py-0.5 bg-indigo-500/20 text-indigo-400 rounded-full border border-indigo-500/30">WebRTC P2P</span>
+                </h1>
+                <p class="text-xs text-slate-400">Collaborative Frame Animation Studio</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <!-- Connection Status Badge -->
+            <div id="connectionStatusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-700/60 border border-slate-600 text-xs font-medium">
+                <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                <span id="statusText">Disconnected (Solo Mode)</span>
+            </div>
+
+            <!-- P2P Connect Modal Trigger Button -->
+            <button onclick="openConnectModal()" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/30 transition-all">
+                <i class="fa-solid fa-network-wired"></i>
+                <span>Connect Peers</span>
+            </button>
+
+            <!-- Vercel Info Button -->
+            <button onclick="openVercelModal()" class="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium rounded-xl border border-slate-600 transition-all" title="Deployment Info">
+                <i class="fa-solid fa-cloud text-cyan-400"></i>
+                <span class="hidden sm:inline">Vercel Ready</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden relative">
+
+        <aside class="w-20 bg-slate-800/90 border-r border-slate-700 flex flex-col items-center py-4 space-y-4 shrink-0 z-10 select-none">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Tools</div>
+            
+            <!-- Tool: Brush -->
+            <button id="toolBrush" onclick="setTool('brush')" class="w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-indigo-600 text-white shadow-md shadow-indigo-600/30 transition-all hover:scale-105" title="Brush">
+                <i class="fa-solid fa-paintbrush"></i>
+            </button>
+
+            <!-- Tool: Eraser -->
+            <button id="toolEraser" onclick="setTool('eraser')" class="w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all hover:scale-105" title="Eraser">
+                <i class="fa-solid fa-eraser"></i>
+            </button>
+
+            <!-- Tool: Clear Frame -->
+            <button onclick="clearCurrentFrame()" class="w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 border border-rose-500/30 transition-all hover:scale-105" title="Clear Current Frame">
+                <i class="fa-solid fa-trash-can"></i>
+            </button>
+
+            <hr class="w-8 border-slate-700 my-2">
+
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Color</div>
+            <!-- Color Picker -->
+            <div class="relative group">
+                <input type="color" id="colorPicker" value="#6366f1" onchange="setColor(this.value)" class="w-10 h-10 rounded-xl cursor-pointer bg-transparent border-2 border-slate-600 hover:border-indigo-500 transition-all p-0.5">
+            </div>
+
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Size</div>
+            <!-- Brush Size Slider -->
+            <div class="flex flex-col items-center space-y-1">
+                <input type="range" id="brushSize" min="1" max="50" value="6" oninput="setBrushSize(this.value)" class="w-12 accent-indigo-500 cursor-pointer h-20 writing-mode-vertical" style="writing-mode: vertical-lr; direction: rtl;">
+                <span id="brushSizeLabel" class="text-xs font-semibold text-slate-400">6px</span>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col items-center justify-center bg-slate-950 relative overflow-hidden p-6">
+            <!-- Canvas Container -->
+            <div id="canvasContainer" class="relative shadow-2xl rounded-2xl overflow-hidden border border-slate-700 checkerboard flex items-center justify-center" style="width: 640px; height: 360px; max-width: 100%; max-height: calc(100vh - 240px);">
+                <!-- Onion Skin Canvas (Previous Frame Ghost) -->
+                <canvas id="onionCanvas" width="640" height="360" class="absolute inset-0 pointer-events-none opacity-30"></canvas>
+                <!-- Main Drawing Canvas -->
+                <canvas id="drawCanvas" width="640" height="360" class="absolute inset-0 cursor-crosshair touch-none"></canvas>
+            </div>
+
+            <!-- Canvas Top Floating HUD (Onionskin & Zoom/Playback Controls) -->
+            <div class="absolute top-8 bg-slate-800/80 backdrop-blur-md border border-slate-700/80 px-4 py-2 rounded-2xl shadow-xl flex items-center space-x-4 z-10">
+                <label class="flex items-center space-x-2 text-xs font-medium text-slate-300 cursor-pointer">
+                    <input type="checkbox" id="onionSkinToggle" onchange="toggleOnionSkin(this.checked)" checked class="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 w-4 h-4">
+                    <span>Onion Skin</span>
+                </label>
+                <div class="h-4 w-px bg-slate-700"></div>
+                <div class="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
+                    <i class="fa-solid fa-clapperboard"></i>
+                    <span id="fpsDisplay">8 FPS</span>
+                </div>
+                <div class="flex items-center space-x-1">
+                    <button onclick="setFps(4)" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] rounded font-medium">4</button>
+                    <button onclick="setFps(8)" class="px-2 py-1 bg-indigo-600 text-[10px] rounded font-medium">8</button>
+                    <button onclick="setFps(12)" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] rounded font-medium">12</button>
+                    <button onclick="setFps(24)" class="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] rounded font-medium">24</button>
+                </div>
+            </div>
+        </main>
+
+        <aside class="w-72 bg-slate-800/90 border-l border-slate-700 flex flex-col shrink-0 hidden lg:flex">
+            <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                <h3 class="font-bold text-xs uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                    <i class="fa-solid fa-comments text-indigo-400"></i> Peer Chat & Logs
+                </h3>
+                <span id="peerCountBadge" class="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full font-medium">0 Peers</span>
+            </div>
+            <!-- Chat Log Feed -->
+            <div id="chatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs flex flex-col">
+                <div class="text-slate-500 text-center italic my-auto">
+                    <i class="fa-solid fa-circle-info mb-1 block text-base"></i>
+                    Connect with a peer using copy/paste signaling codes to chat & draw together in real time!
+                </div>
+            </div>
+            <!-- Chat Input Box -->
+            <div class="p-3 border-t border-slate-700 flex gap-2">
+                <input type="text" id="chatInput" onkeydown="if(event.key==='Enter')sendChatMessage()" placeholder="Type message..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <button onclick="sendChatMessage()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-xl text-white text-xs font-semibold transition-all">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </aside>
+
+    </div>
+
+    <footer class="bg-slate-800 border-t border-slate-700 h-28 px-4 flex items-center justify-between shrink-0 z-20">
+        <!-- Playback Controls -->
+        <div class="flex items-center space-x-2 shrink-0">
+            <button id="playBtn" onclick="togglePlay()" class="w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-600/30 transition-all text-sm" title="Play / Pause Animation">
+                <i id="playIcon" class="fa-solid fa-play"></i>
+            </button>
+            <button onclick="addNewFrame()" class="w-10 h-10 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center justify-center transition-all text-sm" title="Add New Frame">
+                <i class="fa-solid fa-plus"></i>
+            </button>
+            <button onclick="duplicateCurrentFrame()" class="w-10 h-10 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 flex items-center justify-center transition-all text-sm" title="Duplicate Frame">
+                <i class="fa-solid fa-copy"></i>
+            </button>
+            <button onclick="deleteCurrentFrame()" class="w-10 h-10 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center justify-center transition-all text-sm" title="Delete Frame">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </div>
+
+        <!-- Frame Timeline Strip -->
+        <div id="frameStrip" class="flex-1 mx-6 flex items-center space-x-3 overflow-x-auto py-2 px-2">
+            <!-- Dynamically populated frames -->
+        </div>
+
+        <!-- Frame Counter & Info -->
+        <div class="text-xs font-medium text-slate-400 shrink-0 text-right pr-2">
+            Frame <span id="currentFrameNum" class="text-white font-bold">1</span> of <span id="totalFramesNum" class="text-white font-bold">1</span>
+        </div>
+    </footer>
+
+    <div id="connectModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-850">
+                <h3 class="font-bold text-base text-white flex items-center gap-2">
+                    <i class="fa-solid fa-network-wired text-indigo-400"></i> P2P WebRTC Connection
+                </h3>
+                <button onclick="closeConnectModal()" class="text-slate-400 hover:text-white text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
+                <!-- Step 1: Create Offer -->
+                <div class="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">Step 1: Host / Create Offer</span>
+                        <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-medium">For Host</span>
+                    </div>
+                    <p class="text-xs text-slate-300">Generate an offer code and send it to your friend (via Discord, Slack, etc.).</p>
+                    <button onclick="generateOffer()" id="createOfferBtn" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md transition-all">
+                        Generate Offer Code
+                    </button>
+                    <div id="offerCodeContainer" class="hidden space-y-2">
+                        <textarea id="offerCodeOutput" readonly class="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-slate-300 font-mono focus:outline-none select-all" placeholder="Offer code will appear here..."></textarea>
+                        <button onclick="copyToClipboard('offerCodeOutput')" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all">
+                            <i class="fa-regular fa-copy"></i> Copy Offer Code
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Answer Offer -->
+                <div class="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-emerald-400">Step 2: Join / Paste Offer & Create Answer</span>
+                        <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-medium">For Guest</span>
+                    </div>
+                    <p class="text-xs text-slate-300">If your friend sent you an offer code, paste it below to generate your answer code.</p>
+                    <textarea id="remoteOfferInput" placeholder="Paste peer's offer code here..." class="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-emerald-500"></textarea>
+                    <button onclick="acceptOfferAndCreateAnswer()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-md transition-all">
+                        Accept & Generate Answer Code
+                    </button>
+                    <div id="answerCodeContainer" class="hidden space-y-2 pt-2">
+                        <textarea id="answerCodeOutput" readonly class="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-slate-300 font-mono focus:outline-none select-all" placeholder="Answer code will appear here..."></textarea>
+                        <button onclick="copyToClipboard('answerCodeOutput')" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all">
+                            <i class="fa-regular fa-copy"></i> Copy Answer Code
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Finalize Connection (For Host) -->
+                <div class="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-cyan-400">Step 3: Finalize (Host Only)</span>
+                        <span class="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded font-medium">For Host</span>
+                    </div>
+                    <p class="text-xs text-slate-300">Paste the answer code sent back by your friend to complete the P2P connection.</p>
+                    <textarea id="remoteAnswerInput" placeholder="Paste peer's answer code here..." class="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl p-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-cyan-500"></textarea>
+                    <button onclick="finalizeConnection()" class="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-md transition-all">
+                        Establish Connection
+                    </button>
+                </div>
+            </div>
+
+            <div class="px-6 py-3 bg-slate-850 border-t border-slate-800 flex justify-end">
+                <button onclick="closeConnectModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs font-semibold">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="vercelModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-850">
+                <h3 class="font-bold text-base text-white flex items-center gap-2">
+                    <i class="fa-solid fa-cloud text-cyan-400"></i> Deploying to Vercel
+                </h3>
+                <button onclick="closeVercelModal()" class="text-slate-400 hover:text-white text-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4 text-xs text-slate-300">
+                <p class="leading-relaxed">
+                    This WebRTC Collaborative Animation Maker is 100% static and serverless. It requires <strong class="text-white">no backend database or WebSocket server</strong> because it uses direct peer-to-peer WebRTC connections with copy/paste signaling codes!
+                </p>
+                <div class="bg-slate-800 p-4 rounded-xl space-y-2 border border-slate-700">
+                    <h4 class="font-bold text-white uppercase tracking-wider text-[10px] text-cyan-400">Quick Vercel Deployment Steps:</h4>
+                    <ol class="list-decimal list-inside space-y-1.5 text-slate-300">
+                        <li>Save this file as <code class="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300 font-mono">index.html</code> in a new folder.</li>
+                        <li>Initialize git and push your project to GitHub.</li>
+                        <li>Import your repository into <a href="https://vercel.com" target="_blank" class="text-indigo-400 underline hover:text-indigo-300">Vercel</a>.</li>
+                        <li>Leave build settings as default (static HTML) and click <strong class="text-white">Deploy</strong>!</li>
+                    </ol>
+                </div>
+                <p class="text-slate-400 italic">
+                    Tip: For best P2P connection success across different networks, public STUN servers (Google STUN) are pre-configured.
+                </p>
+            </div>
+            <div class="px-6 py-3 bg-slate-850 border-t border-slate-800 flex justify-end">
+                <button onclick="closeVercelModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold">Got it!</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Application State ---
+        let frames = []; // Array of canvas data URLs or ImageData objects
+        let currentFrameIndex = 0;
+        let fps = 8;
+        let isPlaying = false;
+        let playInterval = null;
+
+        // Drawing tool state
+        let currentTool = 'brush'; // 'brush' or 'eraser'
+        let currentColor = '#6366f1';
+        let currentBrushSize = 6;
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let showOnionSkin = true;
+
+        // WebRTC P2P State
+        let pc = null;
+        let dataChannel = null;
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        // DOM Elements
+        const drawCanvas = document.getElementById('drawCanvas');
+        const drawCtx = drawCanvas.getContext('2d');
+        const onionCanvas = document.getElementById('onionCanvas');
+        const onionCtx = onionCanvas.getContext('2d');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        // --- Initialization ---
+        window.onload = function() {
+            initFrames();
+            setupCanvasEvents();
+            renderFrameStrip();
+            redrawCanvas();
+        };
+
+        function initFrames() {
+            // Initialize with 1 blank frame
+            frames = [document.createElement('canvas')];
+            frames[0].width = 640;
+            frames[0].height = 360;
+            currentFrameIndex = 0;
+        }
+
+        // --- Drawing Tools & Logic ---
+        function setTool(tool) {
+            currentTool = tool;
+            document.getElementById('toolBrush').className = tool === 'brush' ? 
+                'w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-indigo-600 text-white shadow-md shadow-indigo-600/30 transition-all hover:scale-105' : 
+                'w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all hover:scale-105';
+            
+            document.getElementById('toolEraser').className = tool === 'eraser' ? 
+                'w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-indigo-600 text-white shadow-md shadow-indigo-600/30 transition-all hover:scale-105' : 
+                'w-12 h-12 rounded-xl flex items-center justify-center text-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all hover:scale-105';
+        }
+
+        function setColor(color) {
+            currentColor = color;
+        }
+
+        function setBrushSize(size) {
+            currentBrushSize = parseInt(size);
+            document.getElementById('brushSizeLabel').innerText = size + 'px';
+        }
+
+        function toggleOnionSkin(val) {
+            showOnionSkin = val;
+            redrawCanvas();
+        }
+
+        function setupCanvasEvents() {
+            const getPos = (e) => {
+                const rect = drawCanvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return {
+                    x: (clientX - rect.left) * (drawCanvas.width / rect.width),
+                    y: (clientY - rect.top) * (drawCanvas.height / rect.height)
+                };
+            };
+
+            const startDraw = (e) => {
+                if (isPlaying) return;
+                isDrawing = true;
+                const pos = getPos(e);
+                lastX = pos.x;
+                lastY = pos.y;
+            };
+
+            const draw = (e) => {
+                if (!isDrawing || isPlaying) return;
+                const pos = getPos(e);
+                
+                drawLine(lastX, lastY, pos.x, pos.y, currentTool === 'eraser' ? '#000000' : currentColor, currentBrushSize, currentTool === 'eraser');
+                
+                // Broadcast stroke via WebRTC DataChannel if connected
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    dataChannel.send(JSON.stringify({
+                        type: 'draw_stroke',
+                        x0: lastX,
+                        y0: lastY,
+                        x1: pos.x,
+                        y1: pos.y,
+                        color: currentColor,
+                        size: currentBrushSize,
+                        isEraser: currentTool === 'eraser',
+                        frameIndex: currentFrameIndex
+                    }));
+                }
+
+                lastX = pos.x;
+                lastY = pos.y;
+            };
+
+            const stopDraw = () => {
+                if (!isDrawing) return;
+                isDrawing = false;
+                saveCurrentFrameToMemory();
+                renderFrameStrip();
+            };
+
+            // Mouse events
+            drawCanvas.addEventListener('mousedown', startDraw);
+            drawCanvas.addEventListener('mousemove', draw);
+            window.addEventListener('mouseup', stopDraw);
+
+            // Touch events
+            drawCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDraw(e); });
+            drawCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); });
+            window.addEventListener('touchend', stopDraw);
+        }
+
+        function drawLine(x0, y0, x1, y1, color, size, isEraser) {
+            const ctx = frames[currentFrameIndex].getContext('2d');
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            if (isEraser) {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.strokeStyle = 'rgba(0,0,0,1)';
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.strokeStyle = color;
+            }
+            ctx.stroke();
+            ctx.closePath();
+            ctx.globalCompositeOperation = 'source-over'; // reset
+            redrawCanvas();
+        }
+
+        function saveCurrentFrameToMemory() {
+            // Already drawing directly onto frames[currentFrameIndex] canvas
+        }
+
+        function redrawCanvas() {
+            // Clear main canvas
+            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+            // Draw current frame
+            if (frames[currentFrameIndex]) {
+                drawCtx.drawImage(frames[currentFrameIndex], 0, 0);
+            }
+
+            // Onion skin (previous frame)
+            onionCtx.clearRect(0, 0, onionCanvas.width, onionCanvas.height);
+            if (showOnionSkin && currentFrameIndex > 0) {
+                onionCtx.drawImage(frames[currentFrameIndex - 1], 0, 0);
+            }
+        }
+
+        function clearCurrentFrame() {
+            const ctx = frames[currentFrameIndex].getContext('2d');
+            ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+            redrawCanvas();
+            renderFrameStrip();
+
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({
+                    type: 'clear_frame',
+                    frameIndex: currentFrameIndex
+                }));
+            }
+        }
+
+        // --- Timeline & Frame Management ---
+        function renderFrameStrip() {
+            const strip = document.getElementById('frameStrip');
+            strip.innerHTML = '';
+
+            frames.forEach((frm, idx) => {
+                const thumb = document.createElement('div');
+                thumb.className = `relative w-20 h-12 rounded-xl border-2 cursor-pointer overflow-hidden flex items-center justify-center bg-slate-900 transition-all shrink-0 ${idx === currentFrameIndex ? 'border-indigo-500 shadow-lg shadow-indigo-500/20 scale-105' : 'border-slate-700 hover:border-slate-500'}`;
+                thumb.onclick = () => switchFrame(idx);
+
+                // Thumbnail canvas preview
+                const thumbCanvas = document.createElement('canvas');
+                thumbCanvas.width = 64;
+                thumbCanvas.height = 36;
+                const tCtx = thumbCanvas.getContext('2d');
+                tCtx.drawImage(frm, 0, 0, 64, 36);
+                thumb.appendChild(thumbCanvas);
+
+                // Frame Number Badge
+                const badge = document.createElement('span');
+                badge.className = 'absolute bottom-1 right-1 bg-slate-950/80 text-[9px] font-bold px-1.5 py-0.5 rounded text-slate-300';
+                badge.innerText = idx + 1;
+                thumb.appendChild(badge);
+
+                strip.appendChild(thumb);
+            });
+
+            document.getElementById('currentFrameNum').innerText = currentFrameIndex + 1;
+            document.getElementById('totalFramesNum').innerText = frames.length;
+        }
+
+        function switchFrame(idx) {
+            if (isPlaying) return;
+            currentFrameIndex = idx;
+            redrawCanvas();
+            renderFrameStrip();
+        }
+
+        function addNewFrame() {
+            if (isPlaying) return;
+            const newCanvas = document.createElement('canvas');
+            newCanvas.width = 640;
+            newCanvas.height = 360;
+            frames.splice(currentFrameIndex + 1, 0, newCanvas);
+            currentFrameIndex++;
+            redrawCanvas();
+            renderFrameStrip();
+        }
+
+        function duplicateCurrentFrame() {
+            if (isPlaying) return;
+            const newCanvas = document.createElement('canvas');
+            newCanvas.width = 640;
+            newCanvas.height = 360;
+            const ctx = newCanvas.getContext('2d');
+            ctx.drawImage(frames[currentFrameIndex], 0, 0);
+            frames.splice(currentFrameIndex + 1, 0, newCanvas);
+            currentFrameIndex++;
+            redrawCanvas();
+            renderFrameStrip();
+        }
+
+        function deleteCurrentFrame() {
+            if (isPlaying || frames.length <= 1) return;
+            frames.splice(currentFrameIndex, 1);
+            if (currentFrameIndex >= frames.length) {
+                currentFrameIndex = frames.length - 1;
+            }
+            redrawCanvas();
+            renderFrameStrip();
+        }
+
+        // --- Playback Controls ---
+        function setFps(newFps) {
+            fps = newFps;
+            document.getElementById('fpsDisplay').innerText = fps + ' FPS';
+            if (isPlaying) {
+                clearInterval(playInterval);
+                startPlaybackInterval();
+            }
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            const playIcon = document.getElementById('playIcon');
+            const playBtn = document.getElementById('playBtn');
+
+            if (isPlaying) {
+                playIcon.className = 'fa-solid fa-pause';
+                playBtn.className = 'w-10 h-10 rounded-xl bg-amber-500 hover:bg-amber-400 text-white flex items-center justify-center shadow-md shadow-amber-500/30 transition-all text-sm';
+                currentFrameIndex = 0;
+                startPlaybackInterval();
+            } else {
+                playIcon.className = 'fa-solid fa-play';
+                playBtn.className = 'w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-600/30 transition-all text-sm';
+                clearInterval(playInterval);
+                redrawCanvas();
+            }
+            renderFrameStrip();
+        }
+
+        function startPlaybackInterval() {
+            const intervalMs = 1000 / fps;
+            playInterval = setInterval(() => {
+                currentFrameIndex = (currentFrameIndex + 1) % frames.length;
+                redrawCanvas();
+                // Highlight active frame during playback without full re-render
+                const thumbs = document.getElementById('frameStrip').children;
+                for (let i = 0; i < thumbs.length; i++) {
+                    thumbs[i].className = `relative w-20 h-12 rounded-xl border-2 cursor-pointer overflow-hidden flex items-center justify-center bg-slate-900 transition-all shrink-0 ${i === currentFrameIndex ? 'border-indigo-500 shadow-lg shadow-indigo-500/20 scale-105' : 'border-slate-700'}`;
+                }
+                document.getElementById('currentFrameNum').innerText = currentFrameIndex + 1;
+            }, intervalMs);
+        }
+
+        // --- WebRTC P2P Signaling & DataChannel Setup ---
+        function openConnectModal() {
+            document.getElementById('connectModal').classList.remove('hidden');
+        }
+
+        function closeConnectModal() {
+            document.getElementById('connectModal').classList.add('hidden');
+        }
+
+        function openVercelModal() {
+            document.getElementById('vercelModal').classList.remove('hidden');
+        }
+
+        function closeVercelModal() {
+            document.getElementById('vercelModal').classList.add('hidden');
+        }
+
+        function copyToClipboard(elementId) {
+            const el = document.getElementById(elementId);
+            el.select();
+            document.execCommand('copy');
+            appendChatMessage('System', 'Copied signaling code to clipboard!');
+        }
+
+        function updateConnectionStatus(status, text) {
+            statusText.innerText = text;
+            if (status === 'connected') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+                document.getElementById('connectionStatusBadge').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-xs font-medium text-emerald-300';
+            } else if (status === 'connecting') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+                document.getElementById('connectionStatusBadge').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-xs font-medium text-amber-300';
+            } else {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+                document.getElementById('connectionStatusBadge').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-700/60 border border-slate-600 text-xs font-medium text-slate-300';
+            }
+        }
+
+        async function generateOffer() {
+            try {
+                pc = new RTCPeerConnection(rtcConfig);
+                setupPeerConnectionHandlers();
+
+                // Host creates DataChannel
+                dataChannel = pc.createDataChannel('animation-sync');
+                setupDataChannelHandlers();
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // Wait for ICE gathering to complete for a complete single-paste code
+                await new Promise((resolve) => {
+                    if (pc.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        pc.onicecandidate = (event) => {
+                            if (!event.candidate) {
+                                resolve();
+                            }
+                        };
+                    }
+                });
+
+                const code = btoa(JSON.stringify(pc.localDescription));
+                document.getElementById('offerCodeOutput').value = code;
+                document.getElementById('offerCodeContainer').classList.remove('hidden');
+                updateConnectionStatus('connecting', 'Waiting for Answer...');
+                appendChatMessage('System', 'Offer code generated! Send it to your peer.');
+            } catch (err) {
+                console.error(err);
+                appendChatMessage('System', 'Error generating offer: ' + err.message);
+            }
+        }
+
+        async function acceptOfferAndCreateAnswer() {
+            const rawInput = document.getElementById('remoteOfferInput').value.trim();
+            if (!rawInput) return;
+
+            try {
+                pc = new RTCPeerConnection(rtcConfig);
+                setupPeerConnectionHandlers();
+
+                // Guest listens for DataChannel
+                pc.ondatachannel = (event) => {
+                    dataChannel = event.channel;
+                    setupDataChannelHandlers();
+                };
+
+                const offerDesc = JSON.parse(atob(rawInput));
+                await pc.setRemoteDescription(new RTCSessionDescription(offerDesc));
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                await new Promise((resolve) => {
+                    if (pc.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        pc.onicecandidate = (event) => {
+                            if (!event.candidate) {
+                                resolve();
+                            }
+                        };
+                    }
+                });
+
+                const code = btoa(JSON.stringify(pc.localDescription));
+                document.getElementById('answerCodeOutput').value = code;
+                document.getElementById('answerCodeContainer').classList.remove('hidden');
+                updateConnectionStatus('connecting', 'Answer generated! Send code back to Host.');
+                appendChatMessage('System', 'Answer code generated! Send it back to the host.');
+            } catch (err) {
+                console.error(err);
+                appendChatMessage('System', 'Error processing offer: ' + err.message);
+            }
+        }
+
+        async function finalizeConnection() {
+            const rawInput = document.getElementById('remoteAnswerInput').value.trim();
+            if (!rawInput || !pc) return;
+
+            try {
+                const answerDesc = JSON.parse(atob(rawInput));
+                await pc.setRemoteDescription(new RTCSessionDescription(answerDesc));
+                appendChatMessage('System', 'Finalizing P2P connection...');
+            } catch (err) {
+                console.error(err);
+                appendChatMessage('System', 'Error finalizing connection: ' + err.message);
+            }
+        }
+
+        function setupPeerConnectionHandlers() {
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'connected') {
+                    updateConnectionStatus('connected', 'Connected (P2P Active)');
+                    appendChatMessage('System', 'Peer successfully connected via WebRTC!');
+                    document.getElementById('peerCountBadge').innerText = '1 Peer';
+                    closeConnectModal();
+                } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+                    updateConnectionStatus('disconnected', 'Disconnected');
+                    appendChatMessage('System', 'Peer connection disconnected.');
+                    document.getElementById('peerCountBadge').innerText = '0 Peers';
+                }
+            };
+        }
+
+        function setupDataChannelHandlers() {
+            dataChannel.onopen = () => {
+                appendChatMessage('System', 'DataChannel open! Live drawing & chat active.');
+                updateConnectionStatus('connected', 'Connected (P2P Active)');
+                document.getElementById('peerCountBadge').innerText = '1 Peer';
+            };
+
+            dataChannel.onclose = () => {
+                appendChatMessage('System', 'DataChannel closed.');
+                updateConnectionStatus('disconnected', 'Disconnected');
+                document.getElementById('peerCountBadge').innerText = '0 Peers';
+            };
+
+            dataChannel.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'draw_stroke') {
+                        // Ensure frame exists
+                        while (frames.length <= data.frameIndex) {
+                            const newCanvas = document.createElement('canvas');
+                            newCanvas.width = 640;
+                            newCanvas.height = 360;
+                            frames.push(newCanvas);
+                        }
+                        const targetCtx = frames[data.frameIndex].getContext('2d');
+                        targetCtx.beginPath();
+                        targetCtx.moveTo(data.x0, data.y0);
+                        targetCtx.lineTo(data.x1, data.y1);
+                        targetCtx.lineWidth = data.size;
+                        targetCtx.lineCap = 'round';
+                        targetCtx.lineJoin = 'round';
+                        if (data.isEraser) {
+                            targetCtx.globalCompositeOperation = 'destination-out';
+                            targetCtx.strokeStyle = 'rgba(0,0,0,1)';
+                        } else {
+                            targetCtx.globalCompositeOperation = 'source-over';
+                            targetCtx.strokeStyle = data.color;
+                        }
+                        targetCtx.stroke();
+                        targetCtx.closePath();
+                        targetCtx.globalCompositeOperation = 'source-over';
+
+                        if (data.frameIndex === currentFrameIndex) {
+                            redrawCanvas();
+                        }
+                        renderFrameStrip();
+                    } else if (data.type === 'clear_frame') {
+                        if (frames[data.frameIndex]) {
+                            const targetCtx = frames[data.frameIndex].getContext('2d');
+                            targetCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+                            if (data.frameIndex === currentFrameIndex) {
+                                redrawCanvas();
+                            }
+                            renderFrameStrip();
+                        }
+                    } else if (data.type === 'chat_message') {
+                        appendChatMessage('Peer', data.text);
+                    }
+                } catch (err) {
+                    console.error('Error handling data channel message:', err);
+                }
+            };
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            appendChatMessage('You', text);
+            input.value = '';
+
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({
+                    type: 'chat_message',
+                    text: text
+                }));
+            }
+        }
+
+        function appendChatMessage(sender, text) {
+            const container = document.getElementById('chatMessages');
+            const isSystem = sender === 'System';
+            const isYou = sender === 'You';
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = isSystem ? 'text-slate-500 italic text-center my-1' : 'flex flex-col space-y-0.5';
+
+            if (isSystem) {
+                msgDiv.innerText = text;
+            } else {
+                const bubble = document.createElement('div');
+                bubble.className = `p-2 rounded-xl max-w-[90%] ${isYou ? 'bg-indigo-600 text-white self-end ml-auto' : 'bg-slate-700 text-slate-200 self-start'}`;
+                bubble.innerText = text;
+
+                const label = document.createElement('span');
+                label.className = `text-[9px] text-slate-400 ${isYou ? 'text-right' : 'text-left'}`;
+                label.innerText = sender;
+
+                msgDiv.appendChild(label);
+                msgDiv.appendChild(bubble);
+            }
+
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
+</body>
+</html>
